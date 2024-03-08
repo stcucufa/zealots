@@ -1,3 +1,4 @@
+const Numbers = ["One", "Two", "Three", "Four", "Five", "Six", "Seven"];
 const Sizes = [9, 9, 8, 8, 7, 6, 6];
 const Densities = [1/3, 1/3, 1/4, 1/4, 1/5, 0, 0];
 const EnemyPeriod = 7;
@@ -217,22 +218,77 @@ const Levels = Enemies.map((creatures, i) => ({
     d: Densities[i]
 }));
 
-const Level = {
-    create({ spawns, targetValue, w, h, d }, avatarGlyph) {
-        return extend(this, { spawns, targetValue, w, h }).init(d, avatarGlyph);
+const Screens = {
+    intro: { w: 9, h: 9, d: 0.2, glyph: "a", text: "ZEALOTSswipetoplay" },
+}
+
+const Screen = {
+    create({ w, h, d, text, glyph }) {
+        return extend(this, { w, h, glyph }).init(d).text(text);
     },
 
-    init(d, avatarGlyph) {
+    alive: true,
+
+    init(d) {
         do { this.tiles = randomGrid(this.w, this.h, d); } while (!connected(this.tiles, this.w));
+        return this;
+    },
+
+    text(text, withAvatar = true) {
+        const creatures = Array.prototype.map.call(text,
+            c => Level.placeCreature.call(this, Creature.create(c), Level.randomEmptyTile.call(this))
+        );
+        const tiles = creatures.map(c => Level.tileOf.call(this, c)).
+            toSorted((a, b) => a.y - b.y || a.x - b.x);
+        tiles[0].creature.avatar = withAvatar;
+        tiles.forEach((t, i) => Level.placeCreature.call(this, creatures[i], t));
+        return this;
+    },
+
+    tick() {
+        this.up = this.glyph;
+    },
+
+    render() {
+        return Level.render.call(this);
+    },
+};
+
+const Level = {
+    create({ spawns, targetValue, w, h, d }, i, avatarGlyph) {
+        return extend(this, { spawns, targetValue, w, h }).init(i, d, avatarGlyph);
+    },
+
+    init(i, d, avatarGlyph) {
+        Screen.init.call(this, d);
+        Screen.text.call(this, `Level${Numbers[i]}`);
+        this.willBegin = () => { this.begin(d, avatarGlyph); };
+        this.showIntro = true;
+        this.t = 0;
+        this.teleportQueue = [];
+        return this;
+    },
+
+    clear() {
+        for (const tile of this.tiles) {
+            delete tile.creature;
+        }
+        delete this.exit;
+    },
+
+    message(text) {
+        this.clear();
+        Screen.text.call(this, text, false);
+    },
+
+    begin(d, avatarGlyph) {
+        this.clear();
         const avatar = Creature.create(avatarGlyph);
         avatar.avatar = true;
         this.placeCreature(avatar, this.randomEmptyTile());
         for (let i = 0; i < EnemyPeriod; ++i) {
             this.spawnCreature();
         }
-        this.t = 0;
-        this.teleportQueue = [];
-        return this;
     },
 
     alive: true,
@@ -259,6 +315,15 @@ const Level = {
     },
 
     tick() {
+        if (this.showIntro) {
+            delete this.showIntro;
+            return;
+        }
+        if (this.willBegin) {
+            this.willBegin();
+            delete this.willBegin;
+            return;
+        }
         this.teleportQueue.length = 0;
         this.t += 1;
         const r = EnemyPeriod * Math.random();
@@ -309,7 +374,7 @@ const Level = {
                 d.value += 1;
             } else {
                 delete this.tileOf(d).creature;
-                c.protected = false;
+                c.protected = d.protected;
                 c.value += 1;
                 this.placeCreature(c, this.tileOf(d));
             }
@@ -415,20 +480,21 @@ const Level = {
 
 const Game = {
     create(canvas) {
-        return extend(this, { canvas }).init("a");
+        return extend(this, { canvas }).init();
     },
 
-    init(avatarGlyph) {
+    init() {
         document.addEventListener("keydown", this);
         document.addEventListener("keyup", this);
         document.addEventListener("pointerdown", this);
-        return this.newLevel(avatarGlyph, 0);
+        this.level = Screen.create(Screens.intro);
+        this.i = -1;
+        return this;
     },
 
     newLevel(avatarGlyph, i) {
-        setTimeout(() => alert(`Level ${i + 1}`), 50);
         this.i = i;
-        this.level = Level.create(Levels[i], avatarGlyph);
+        this.level = Level.create(Levels[i], i, avatarGlyph);
         return this;
     },
 
@@ -438,7 +504,7 @@ const Game = {
         document.removeEventListener("pointerdown", this);
         this.canvas.classList.add("game-over");
         this.canvas.classList.toggle("won", won);
-        setTimeout(() => alert(won ? "You win!" : "Game Over"), 50);
+        this.level.message(won ? "YOUWIN!!!" : "GAMEOVER!!!");
     },
 
     handleEvent(event) {
@@ -468,13 +534,13 @@ const Game = {
                 delete this.y0;
                 delete this.theta;
                 if (around(th, -0.5)) {
-                    this.level.moveUp();
+                    this.level.moveUp?.();
                 } else if (around(th, 0.5)) {
-                    this.level.moveDown();
+                    this.level.moveDown?.();
                 } else if (around(Math.abs(th), 1)) {
-                    this.level.moveLeft();
+                    this.level.moveLeft?.();
                 } else if (around(th, 0)) {
-                    this.level.moveRight();
+                    this.level.moveRight?.();
                 } else {
                     return;
                 }
@@ -497,16 +563,16 @@ const Game = {
         } else {
             switch (event.key) {
                 case "ArrowUp":
-                    this.level.moveUp();
+                    this.level.moveUp?.();
                     break;
                 case "ArrowDown":
-                    this.level.moveDown();
+                    this.level.moveDown?.();
                     break;
                 case "ArrowLeft":
-                    this.level.moveLeft();
+                    this.level.moveLeft?.();
                     break;
                 case "ArrowRight":
-                    this.level.moveRight();
+                    this.level.moveRight?.();
                     break;
                 default:
                     return;
