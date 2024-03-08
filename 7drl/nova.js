@@ -59,23 +59,45 @@ const Wall = {
 
 const Floor = {
     create(x, y) {
-        return Object.assign(Object.create(this), { glyph: Math.random() < 0.5 ? "." : "_", x, y });
+        return Object.assign(Object.create(this), { glyph: " " /*Math.random() < 0.5 ? "." : "_"*/, x, y });
     },
 
-    render(game) {
-        return this.creature?.render(game) ?? this.glyph;
+    render() {
+        return this.creature?.render() ?? this.glyph;
     },
 
     empty: true
 };
 
 const Creature = {
-    create(glyph, color) {
+    create(glyph) {
         return Object.assign(Object.create(this), { glyph });
     },
 
-    render(game) {
-        return this === game.avatar ? `<span class="avatar">${this.glyph}</span>` : this.glyph;
+    get value() {
+        return parseInt(this.glyph.replace(/@/, "9"), 36) - 10;
+    },
+
+    set value(v) {
+        const p = this.protected;
+        this.glyph = (v + 10).toString(36);
+        this.protected = p;
+    },
+
+    get protected() {
+        return /[A-Z]/.test(this.glyph);
+    },
+
+    set protected(p) {
+        if (p) {
+            this.glyph = this.glyph.toUpperCase();
+        } else {
+            this.glyph = this.glyph.toLowerCase();
+        }
+    },
+
+    render() {
+        return this.avatar ? `<span class="avatar">${this.glyph}</span>` : this.glyph;
     }
 };
 
@@ -86,23 +108,80 @@ const Level = {
         return Object.assign(Object.create(this), { w, h, tiles });
     },
 
-    render(game) {
-        game.canvas.innerHTML = this.tiles.map(
-            (tile, i) => `${tile.render(game)}${(i + 1) % this.w === 0 ? "\n" : " "}`
+    render() {
+        return this.tiles.map(
+            (tile, i) => `${tile.render()}${(i + 1) % this.w === 0 ? "\n" : " "}`
         ).join("");
     },
 
     randomEmptyTile() {
-        return randomItem(this.tiles.filter(tile => tile.empty));
+        return randomItem(this.tiles.filter(tile => tile.empty && !tile.creature));
+    },
+
+    // Resolve conflict of creature c trying to move to a space occupied by
+    // creature d.
+    resolveConflict(c, d) {
+
+        // If c was the avatar and it was deleted, actually delete d.
+        const fixAvatar = () => {
+            if (c.avatar) {
+                console.info("Fix avatar!");
+                delete this.tileOf(d).creature;
+                c.glyph = d.glyph;
+                this.placeCreature(c, this.tileOf(d));
+            }
+        }
+
+        if (c.value === d.value) {
+            // Same value: merge and become/stay protected
+            delete this.tileOf(c).creature;
+            d.protected = true;
+            fixAvatar();
+        } else if (c.value - d.value === 1) {
+            // Increasing value: become even stronger (c is strongest)
+            delete this.tileOf(c).creature;
+            d.protected = d.protected && c.protected;
+            d.value = c.value + 1;
+            fixAvatar();
+        } else if (d.value - c.value === 1) {
+            // Increasing value: become even stronger (d is strongest)
+            delete this.tileOf(c).creature;
+            d.protected = d.protected && c.protected;
+            d.value += 1;
+            fixAvatar();
+        } else {
+            // Fight, both creatures get knocked down a notch, unless they
+            // are protected (then they lose their protection).
+            if (c.protected) {
+                c.protected = false;
+            } else if (c.value <= 0) {
+                delete this.tileOf(c).creature;
+            } else {
+                c.value -= 1;
+            }
+            if (d.protected) {
+                d.protected = false;
+            } else if (d.value <= 0) {
+                delete this.tileOf(c).creature;
+                delete this.tileOf(d).creature;
+                this.placeCreature(c, this.tileOf(d));
+            } else {
+                d.value -= 1;
+            }
+        }
     },
 
     moveCreatures(creatures, diff) {
         for (const creature of creatures) {
             const i = creature.x + creature.y * this.w;
             const dest = this.tiles[i + diff];
-            if (dest.empty && !dest.creature) {
-                delete this.tiles[i].creature;
-                this.placeCreature(creature, dest);
+            if (dest.empty) {
+                if (!dest.creature) {
+                    delete this.tiles[i].creature;
+                    this.placeCreature(creature, dest);
+                } else {
+                    this.resolveConflict(creature, dest.creature);
+                }
             }
         }
     },
@@ -132,6 +211,10 @@ const Level = {
         creature.y = tile.y;
         tile.creature = creature;
         return creature;
+    },
+
+    tileOf(creature) {
+        return this.tiles[creature.x + creature.y * this.w];
     }
 };
 
@@ -140,14 +223,16 @@ const Game = {
         const game = Object.create(this);
         game.canvas = canvas;
         game.level = Level.create(w, h, d);
-        game.avatar = game.level.placeCreature(Creature.create("@"), game.level.randomEmptyTile());
-
+        const avatar = Creature.create("@");
+        avatar.avatar = true;
+        game.level.placeCreature(avatar, game.level.randomEmptyTile());
         game.level.placeCreature(Creature.create("a"), game.level.randomEmptyTile());
         game.level.placeCreature(Creature.create("b"), game.level.randomEmptyTile());
-
+        game.level.placeCreature(Creature.create("e"), game.level.randomEmptyTile());
         document.addEventListener("keydown", game);
         document.addEventListener("keyup", game);
         document.addEventListener("pointerdown", game);
+        game.t = 0;
         return game;
     },
 
@@ -227,9 +312,18 @@ const Game = {
     },
 
     render() {
-        this.level.render(this);
+        this.t += 1;
+        const r = 10 * Math.random();
+        console.log(this.t, r);
+        if (r < this.t) {
+            this.t = 0;
+            this.level.placeCreature(
+                Creature.create(randomItem("cdef".split(""))),
+                this.level.randomEmptyTile()
+            );
+        }
+        this.canvas.innerHTML = this.level.render();
     }
 };
 
-const game = Game.create(document.querySelector("pre.canvas"), W, H, D);
-game.render();
+Game.create(document.querySelector("pre.canvas"), W, H, D).render();
