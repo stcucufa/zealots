@@ -6,3 +6,5 @@ Harpies and Shoggoths, Ifrits and Rocs, Jabberwocks and Quetzalcoatls, Krakens a
 Oozes, and Mermaids and Nereids during your journey. You will merge your Essence with all of them to
 attain your goal, but you will proceed with caution as losing your Essence will condemn you to tarry for
 eternity in Limbo instead.
+
+ ![Cover image for Z.E.A.L.O.T.S.](cover.png)
