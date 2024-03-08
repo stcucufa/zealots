@@ -49,8 +49,8 @@ pre.canvas.game-over {
     color: var(--pink);
     font-weight: 1000;
     outline: solid thin var(--pink);
-    padding: 0.5rem 1rem;
-    margin: -0.5rem -1rem;
+    padding: 0 1rem;
+    margin: 0 -1rem;
 }
 
 .wall {

@@ -47,9 +47,11 @@ function connected(tiles, w) {
     return roots.size === 1;
 }
 
+const extend = (object, properties) => Object.assign(Object.create(object), properties);
+
 const Wall = {
     create(x, y) {
-        return Object.assign(Object.create(this), { x, y });
+        return extend(this, { x, y });
     },
 
     render() {
@@ -61,7 +63,7 @@ const Wall = {
 
 const Floor = {
     create(x, y) {
-        return Object.assign(Object.create(this), { glyph: Math.random() < 0.66 ? "." : "_", x, y });
+        return extend(this, { glyph: ".", x, y });
     },
 
     render() {
@@ -71,22 +73,14 @@ const Floor = {
     empty: true
 };
 
-const Exit = Object.assign(Object.create(Floor), {
-    create(x, y) {
-        return Object.assign(Object.create(this), { glyph: "/", x, y });
-    }
-});
-
 const Creature = {
     create(glyph) {
-        return Object.assign(Object.create(this), { glyph });
+        return extend(this, { glyph });
     },
 
     get value() {
         return parseInt(this.glyph, 36);
     },
-
-    canMove: true,
 
     set value(v) {
         const p = this.protected;
@@ -111,17 +105,116 @@ const Creature = {
     }
 };
 
+const effect = (glyph, consumeEffect) => extend(Creature, {
+    create() {
+        return extend(this, { glyph });
+    },
+
+    consumeEffect
+});
+
+// Exit: moves the creature to the next level; this is what the player wants
+// to do.
+const Exit = effect("/", function(c, level) {
+    if (c.avatar) {
+        level.won = c.glyph;
+    } else {
+        delete level.tileOf(c).creature;
+    }
+    return false;
+});
+
+// Avatarize: toggles the avatar switch of the creature.
+const Avatar = effect("@", function(c, level) {
+    c.avatar = !c.avatar;
+    return true;
+});
+
+// Buff: increase the protection/value of the creature.
+const Buff = effect("+", function(c) {
+    c.protected = !c.protected;
+    if (!c.protected) {
+        c.value += 1;
+    }
+    return true;
+});
+
+// Debuff: decrease the protection/value of the creature.
+const Debuff = effect("-", function(c) {
+    if (c.protected) {
+        c.protected = false;
+    } else {
+        c.value -= 1;
+    }
+    return true;
+});
+
+// Split: break the protection of the creature, or split it into two halves of
+// lower value (and kills a).
+const Split = effect("%", function(c, level) {
+    if (c.protected) {
+        c.protected = false;
+    } else {
+        c.value -= 1;
+        if (c.value < 10) {
+            return true;
+        }
+        delete level.tileOf(this).creature;
+        const d = Creature.create(c.glyph);
+        if (c.avatar) {
+            d.avatar = true;
+        }
+        level.placeCreature(d, level.tileOf(this));
+    }
+    return false;
+});
+
+// Teleport: transport creature to a random empty tile. May affect protection
+// as a side effect (?!)
+const Teleport = effect("~", function(c, level) {
+    const origin = level.tileOf(c);
+    delete level.tileOf(c).creature;
+    delete level.tileOf(this).creature;
+    level.placeRandomly(c);
+});
+
+// Trap: disappears the creature.
+const Trap = effect("\\", function(c, level) {
+    delete level.tileOf(c).creature;
+    delete level.tileOf(this).creature;
+    return false;
+});
+
+// Random: bump once to reveal.
+const Random = effect("?", function(c, level) {
+    delete level.tileOf(this).creature;
+    level.placeCreature(randomItem(Effects).create(), level.tileOf(this));
+    return false;
+});
+
+const Effects = [Avatar, Buff, Debuff, Split, Teleport, Trap];
+const SpawnEffects = [Random, ...Effects];
+
 const Level = {
     create(w, h, d, i, avatarGlyph) {
-        return Object.assign(Object.create(this), { w, h, i }).init(d, avatarGlyph);
+        return extend(this, { w, h, i }).init(d, avatarGlyph);
     },
 
     alive: true,
 
     spawnCreature() {
-        const c = Creature.create(randomItem(Enemies[this.i]));
-        c.protected = Math.random() < 0.5;
-        this.placeCreature(c, this.randomEmptyTile());
+        const create = [
+            ...Enemies[this.i].map(glyph => () => Creature.create(glyph)),
+            ...SpawnEffects.map(f => () => f.create())
+        ];
+        this.placeRandomly(randomItem(create)());
+    },
+
+    placeRandomly(c) {
+        if (typeof c.consumeEffect !== "function") {
+            c.protected = Math.random() < 0.5;
+        }
+        return this.placeCreature(c, this.randomEmptyTile());
     },
 
     init(d, avatarGlyph) {
@@ -158,6 +251,26 @@ const Level = {
     // Resolve conflict of creature c trying to move to a space occupied by
     // creature d.
     resolveConflict(c, d) {
+
+        if (typeof c.consumeEffect === "function") {
+            // No effect.
+            return;
+        }
+
+        if (typeof d.consumeEffect === "function") {
+            // c is a regular creature so the effect applies and may be
+            // consumed by the creature.
+            if (d.consumeEffect(c, this)) {
+                if (c.value < 10) {
+                    // c did not survive the effect!
+                    delete this.tileOf(c).creature;
+                } else {
+                    this.replaceCreature(c, d);
+                }
+            }
+            c.block = true;
+            return;
+        }
 
         if (d.block) {
             // d is blocking (it already bumped into another creature) so
@@ -201,9 +314,7 @@ const Level = {
             } else {
                 d.value -= 1;
                 if (d.value < 10) {
-                    delete this.tileOf(c).creature;
-                    delete this.tileOf(d).creature;
-                    this.placeCreature(c, this.tileOf(d));
+                    this.replaceCreature(c, d);
                 } else {
                     c.block = true;
                 }
@@ -211,6 +322,14 @@ const Level = {
         }
     },
 
+    // Replace creature d with c.
+    replaceCreature(c, d) {
+        delete this.tileOf(c).creature;
+        delete this.tileOf(d).creature;
+        this.placeCreature(c, this.tileOf(d));
+    },
+
+    // Move all creatures in the same direction.
     moveCreatures(creatures, diff) {
         for (const creature of creatures) {
             // Clear the block flag from last turn.
@@ -236,11 +355,7 @@ const Level = {
                 { value: 0 }
             );
             if (strongest?.avatar) {
-                const tile = this.randomEmptyTile();
-                if (tile) {
-                    this.exit = Exit.create(tile.x, tile.y);
-                    this.tiles[tile.x + tile.y * this.w] = this.exit;
-                }
+                this.exit = this.placeRandomly(Exit.create());
             }
         }
 
@@ -248,13 +363,6 @@ const Level = {
         const avatarTiles = this.tiles.filter(c => c.creature?.avatar);
         if (avatarTiles.length === 0) {
             this.alive = false;
-        } else if (this.exit) {
-            for (const tile of avatarTiles) {
-                if (tile === this.exit) {
-                    this.won = tile.creature.glyph;
-                    return;
-                }
-            }
         }
     },
 
@@ -292,7 +400,7 @@ const Level = {
 
 const Game = {
     create(canvas, w, h, d) {
-        return Object.assign(Object.create(this), { canvas, w, h, d }).init("a");
+        return extend(this, { canvas, w, h, d }).init("a");
     },
 
     init(avatarGlyph) {
