@@ -41,9 +41,16 @@ pre.canvas {
     cursor: default;
 }
 
+pre.canvas.game-over {
+    color: var(--dark-red);
+}
+
 .avatar {
-    color: var(--green);
+    color: var(--pink);
     font-weight: 1000;
+    outline: solid thin var(--pink);
+    padding: 0.5rem 1rem;
+    margin: -0.5rem -1rem;
 }
 
 .wall {

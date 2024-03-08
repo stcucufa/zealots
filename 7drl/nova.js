@@ -1,6 +1,8 @@
 const W = 9;
 const H = W;
-const D = 1 / 3;
+const LevelDensity = 1 / 3;
+const EnemyPeriod = 7;
+const Enemies = ["abcde", "efghi", "ijklmno", "opqrstu", "uvwxy", "xyz"].map(cs => cs.split(""));
 
 const randomInt = n => Math.floor(Math.random() * n);
 const randomItem = items => items[randomInt(items.length)];
@@ -59,7 +61,7 @@ const Wall = {
 
 const Floor = {
     create(x, y) {
-        return Object.assign(Object.create(this), { glyph: " " /*Math.random() < 0.5 ? "." : "_"*/, x, y });
+        return Object.assign(Object.create(this), { glyph: Math.random() < 0.66 ? "." : "_", x, y });
     },
 
     render() {
@@ -69,18 +71,26 @@ const Floor = {
     empty: true
 };
 
+const Exit = Object.assign(Object.create(Floor), {
+    create(x, y) {
+        return Object.assign(Object.create(this), { glyph: "/", x, y });
+    }
+});
+
 const Creature = {
     create(glyph) {
         return Object.assign(Object.create(this), { glyph });
     },
 
     get value() {
-        return parseInt(this.glyph.replace(/@/, "9"), 36) - 10;
+        return parseInt(this.glyph, 36);
     },
+
+    canMove: true,
 
     set value(v) {
         const p = this.protected;
-        this.glyph = (v + 10).toString(36);
+        this.glyph = v.toString(36);
         this.protected = p;
     },
 
@@ -102,16 +112,43 @@ const Creature = {
 };
 
 const Level = {
-    create(w, h, d) {
-        let tiles;
-        do { tiles = randomGrid(w, h, d); } while (!connected(tiles, w));
-        return Object.assign(Object.create(this), { w, h, tiles });
+    create(w, h, d, i, avatarGlyph) {
+        return Object.assign(Object.create(this), { w, h, i }).init(d, avatarGlyph);
+    },
+
+    alive: true,
+
+    spawnCreature() {
+        const c = Creature.create(randomItem(Enemies[this.i]));
+        c.protected = Math.random() < 0.5;
+        this.placeCreature(c, this.randomEmptyTile());
+    },
+
+    init(d, avatarGlyph) {
+        do { this.tiles = randomGrid(this.w, this.h, d); } while (!connected(this.tiles, this.w));
+        const avatar = Creature.create(avatarGlyph);
+        avatar.avatar = true;
+        this.placeCreature(avatar, this.randomEmptyTile());
+        for (let i = 0; i < EnemyPeriod; ++i) {
+            this.spawnCreature();
+        }
+        this.t = 0;
+        return this;
     },
 
     render() {
         return this.tiles.map(
             (tile, i) => `${tile.render()}${(i + 1) % this.w === 0 ? "\n" : " "}`
         ).join("");
+    },
+
+    tick() {
+        this.t += 1;
+        const r = EnemyPeriod * Math.random();
+        if (r < this.t) {
+            this.t = 0;
+            this.spawnCreature();
+        }
     },
 
     randomEmptyTile() {
@@ -122,56 +159,63 @@ const Level = {
     // creature d.
     resolveConflict(c, d) {
 
-        // If c was the avatar and it was deleted, actually delete d.
-        const fixAvatar = () => {
-            if (c.avatar) {
-                console.info("Fix avatar!");
-                delete this.tileOf(d).creature;
-                c.glyph = d.glyph;
-                this.placeCreature(c, this.tileOf(d));
-            }
+        if (d.block) {
+            // d is blocking (it already bumped into another creature) so
+            // nothing happens and c becomes blocking in turn to prevent
+            // chain reactions.
+            c.block = true;
+            return;
         }
 
         if (c.value === d.value) {
-            // Same value: merge and become/stay protected
+            // c moves forward and absorbs d; its strength increases (it either
+            // becomes protected, or if it was, its value increases by one).
+            // d absorbs c if it is protected and not c.
             delete this.tileOf(c).creature;
-            d.protected = true;
-            fixAvatar();
-        } else if (c.value - d.value === 1) {
-            // Increasing value: become even stronger (c is strongest)
-            delete this.tileOf(c).creature;
-            d.protected = d.protected && c.protected;
-            d.value = c.value + 1;
-            fixAvatar();
-        } else if (d.value - c.value === 1) {
-            // Increasing value: become even stronger (d is strongest)
-            delete this.tileOf(c).creature;
-            d.protected = d.protected && c.protected;
-            d.value += 1;
-            fixAvatar();
+            if (d.protected && !c.protected) {
+                d.value += 1;
+                d.protected = false;
+            } else {
+                delete this.tileOf(d).creature;
+                c.protected = !c.protected;
+                if (!c.protected) {
+                    c.value += 1;
+                }
+                this.placeCreature(c, this.tileOf(d));
+            }
         } else {
             // Fight, both creatures get knocked down a notch, unless they
-            // are protected (then they lose their protection).
+            // are protected (then they lose their protection). One creature
+            // may die in the process; if it is d, then c replaces it.
             if (c.protected) {
                 c.protected = false;
-            } else if (c.value <= 0) {
-                delete this.tileOf(c).creature;
             } else {
                 c.value -= 1;
+                if (c.value < 10) {
+                    delete this.tileOf(c).creature;
+                }
             }
             if (d.protected) {
                 d.protected = false;
-            } else if (d.value <= 0) {
-                delete this.tileOf(c).creature;
-                delete this.tileOf(d).creature;
-                this.placeCreature(c, this.tileOf(d));
+                c.block = true;
             } else {
                 d.value -= 1;
+                if (d.value < 10) {
+                    delete this.tileOf(c).creature;
+                    delete this.tileOf(d).creature;
+                    this.placeCreature(c, this.tileOf(d));
+                } else {
+                    c.block = true;
+                }
             }
         }
     },
 
     moveCreatures(creatures, diff) {
+        for (const creature of creatures) {
+            // Clear the block flag from last turn.
+            delete creature.block;
+        }
         for (const creature of creatures) {
             const i = creature.x + creature.y * this.w;
             const dest = this.tiles[i + diff];
@@ -181,6 +225,34 @@ const Level = {
                     this.placeCreature(creature, dest);
                 } else {
                     this.resolveConflict(creature, dest.creature);
+                }
+            }
+        }
+
+        // If the avatar became the strongest creature, the exit appears.
+        if (!this.exit) {
+            const strongest = creatures.reduce(
+                (z, c) => (c.value > z.value) || (c.value === z.value && c.avatar) ? c : z,
+                { value: 0 }
+            );
+            if (strongest?.avatar) {
+                const tile = this.randomEmptyTile();
+                if (tile) {
+                    this.exit = Exit.create(tile.x, tile.y);
+                    this.tiles[tile.x + tile.y * this.w] = this.exit;
+                }
+            }
+        }
+
+        // If there is no avatar creature left, this is game over.
+        const avatarTiles = this.tiles.filter(c => c.creature?.avatar);
+        if (avatarTiles.length === 0) {
+            this.alive = false;
+        } else if (this.exit) {
+            for (const tile of avatarTiles) {
+                if (tile === this.exit) {
+                    this.won = tile.creature.glyph;
+                    return;
                 }
             }
         }
@@ -220,20 +292,27 @@ const Level = {
 
 const Game = {
     create(canvas, w, h, d) {
-        const game = Object.create(this);
-        game.canvas = canvas;
-        game.level = Level.create(w, h, d);
-        const avatar = Creature.create("@");
-        avatar.avatar = true;
-        game.level.placeCreature(avatar, game.level.randomEmptyTile());
-        game.level.placeCreature(Creature.create("a"), game.level.randomEmptyTile());
-        game.level.placeCreature(Creature.create("b"), game.level.randomEmptyTile());
-        game.level.placeCreature(Creature.create("e"), game.level.randomEmptyTile());
-        document.addEventListener("keydown", game);
-        document.addEventListener("keyup", game);
-        document.addEventListener("pointerdown", game);
-        game.t = 0;
-        return game;
+        return Object.assign(Object.create(this), { canvas, w, h, d }).init("a");
+    },
+
+    init(avatarGlyph) {
+        document.addEventListener("keydown", this);
+        document.addEventListener("keyup", this);
+        document.addEventListener("pointerdown", this);
+        return this.newLevel(avatarGlyph, 0);
+    },
+
+    newLevel(avatarGlyph, i) {
+        this.i = i;
+        this.level = Level.create(this.w, this.h, this.d, i, avatarGlyph);
+        return this;
+    },
+
+    gameOver() {
+        document.removeEventListener("keydown", this);
+        document.removeEventListener("keyup", this);
+        document.removeEventListener("pointerdown", this);
+        this.canvas.classList.add("game-over");
     },
 
     handleEvent(event) {
@@ -273,7 +352,7 @@ const Game = {
                 } else {
                     return;
                 }
-                this.render();
+                this.tick();
                 break;
         }
     },
@@ -306,24 +385,23 @@ const Game = {
                 default:
                     return;
             }
-            this.render();
+            this.tick();
         }
         event.preventDefault();
     },
 
-    render() {
-        this.t += 1;
-        const r = 10 * Math.random();
-        console.log(this.t, r);
-        if (r < this.t) {
-            this.t = 0;
-            this.level.placeCreature(
-                Creature.create(randomItem("cdef".split(""))),
-                this.level.randomEmptyTile()
-            );
+    tick() {
+        if (this.level.alive) {
+            if (this.level.won) {
+                this.newLevel(this.level.won, Math.min(this.i + 1, Enemies.length - 1)).tick();
+            } else {
+                this.level.tick();
+            }
+        } else {
+            this.gameOver();
         }
         this.canvas.innerHTML = this.level.render();
     }
 };
 
-Game.create(document.querySelector("pre.canvas"), W, H, D).render();
+Game.create(document.querySelector("pre.canvas"), W, H, LevelDensity).tick();
