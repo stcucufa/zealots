@@ -504,7 +504,7 @@ const Game = {
         document.removeEventListener("pointerdown", this);
         this.canvas.classList.add("game-over");
         this.canvas.classList.toggle("won", won);
-        this.level.message(won ? "YOUWIN!!!" : "GAMEOVER!!!");
+        this.level.message(won ? "ASCENDED!" : "LOSTYOURESSENCE!");
     },
 
     handleEvent(event) {
