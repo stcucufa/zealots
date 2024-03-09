@@ -493,15 +493,14 @@ const Game = {
     },
 
     newLevel(avatarGlyph, i) {
+        this.canvas.classList.remove("game-over");
+        this.canvas.classList.remove("won");
         this.i = i;
         this.level = Level.create(Levels[i], i, avatarGlyph);
         return this;
     },
 
     gameOver(won) {
-        document.removeEventListener("keydown", this);
-        document.removeEventListener("keyup", this);
-        document.removeEventListener("pointerdown", this);
         this.canvas.classList.add("game-over");
         this.canvas.classList.toggle("won", won);
         this.level.message(won ? "ASCENDED!" : "LOSTYOURESSENCE!");
@@ -596,11 +595,14 @@ const Game = {
         } else if (this.level.down) {
             if (this.i === 0) {
                 this.gameOver(false);
+                this.i = 1;
             } else {
-                this.newLevel(this.level.down, this.i - 1);
+                this.newLevel(this.level.down, this.i - 1).tick();
             }
         } else {
             this.gameOver(false);
+            this.i = 1;
+            this.level.down = "a";
         }
         this.canvas.innerHTML = this.level.render();
     }
