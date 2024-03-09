@@ -8,3 +8,5 @@ of them to attain your goal, but you will proceed with caution as losing your Es
 tarry for eternity in Limbo instead.
 
  ![Cover image for Z.E.A.L.O.T.S.](cover.png)
+
+Play the game locally by visiting the index page in your browser of choice, on on [itch.io](https://hazure.itch.io/zealots).
