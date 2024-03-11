@@ -52,7 +52,6 @@ function connected(tiles, w) {
     for (const tile of emptyTiles) {
         roots.add(findSet(tile));
     }
-    console.info(`Components: ${roots.size}`);
     return roots.size === 1;
 }
 
@@ -504,6 +503,10 @@ const Game = {
         this.canvas.classList.add("game-over");
         this.canvas.classList.toggle("won", won);
         this.level.message(won ? "ASCENDED!" : "LOSTYOURESSENCE!");
+        if (won) {
+            this.i = 1;
+            this.level.down = "a";
+        }
     },
 
     handleEvent(event) {
